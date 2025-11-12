@@ -1,0 +1,76 @@
+{
+  "sessionId": "test-session-123",
+  "behavioral_data": {
+    "mouse_movements": [
+      {"timestamp": 1700000000000, "x": 400, "y": 300, "velocity": 1.2},
+      {"timestamp": 1700000000500, "x": 420, "y": 320, "velocity": 1.5},
+      {"timestamp": 1700000001000, "x": 450, "y": 360, "velocity": 2.0}
+    ],
+    "click_patterns": {
+      "avg_click_interval": 800,
+      "click_precision": 0.8,
+      "double_click_rate": 0.05
+    },
+    "keystroke_dynamics": {
+      "typing_speed": 180,
+      "key_hold_time": 120,
+      "key_interval_variance": 50
+    },
+    "scroll_behavior": {
+      "scroll_speed": 250,
+      "scroll_acceleration": 2.0,
+      "pause_frequency": 0.1
+    },
+    "page_interaction": {
+      "session_duration": 45,
+      "page_dwell_time": 45,
+      "first_interaction_delay": 500,
+      "navigation_pattern": "linear",
+      "form_fill_speed": 3.0
+    }
+  },
+  "recent_actions": [
+    {"action": "mouse_move", "timestamp": 1700000000000, "x": 400, "y": 300, "velocity": 1.2},
+    {"action": "mouse_move", "timestamp": 1700000000500, "x": 420, "y": 320, "velocity": 1.5},
+    {"action": "click", "timestamp": 1700000000900, "x": 430, "y": 330},
+    {"action": "scroll", "timestamp": 1700000001200, "deltaY": 120},
+    {"action": "keystroke", "timestamp": 1700000001500, "key": "a"},
+    {"action": "idle", "timestamp": 1700000002000}
+  ],
+  "device_fingerprint": {
+    "screen_resolution": "1920x1080",
+    "timezone": "Asia/Tokyo",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "user_agent_hash": "abcd1234",
+    "user_agent_brands": ["Chromium/120", "Google Chrome/120"],
+    "vendor": "Google Inc.",
+    "app_version": "5.0 (Windows)",
+    "platform": "Win32",
+    "browser_info": {
+      "name": "Google Chrome",
+      "version": "120.0.0.0",
+      "os": "Windows 10",
+      "engine": "Blink",
+      "is_chromium_based": true,
+      "is_chrome": true,
+      "is_pure_chromium": false
+    },
+    "canvas_fingerprint": "canvas-hash",
+    "webgl_fingerprint": "webgl-hash"
+  },
+  "persona_features": {
+    "age": 35,
+    "gender": 1,
+    "prefecture": 13,
+    "purchase": {
+      "product_category": 1,
+      "quantity": 1,
+      "price": 5000,
+      "total_amount": 5000,
+      "purchase_time": 14,
+      "limited_flag": 0,
+      "payment_method": 3,
+      "manufacturer": 5
+    }
+  }
+}

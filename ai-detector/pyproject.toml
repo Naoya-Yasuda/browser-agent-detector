@@ -1,0 +1,139 @@
+[project]
+name = "detect-ai-agent"
+version = "0.1.0"
+description = "AIエージェント検出システム"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" },
+]
+readme = "README.md"
+requires-python = ">=3.10,<4.0"
+dependencies = [
+    "fastapi>=0.116.1,<0.117.0",
+    "uvicorn>=0.35.0,<0.36.0",
+    "lightgbm>=4.6.0,<5.0.0",
+    "numpy>=1.24.0,<2.0.0",
+    "scikit-learn>=1.3.0,<2.0.0",
+    "joblib>=1.3.0,<2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0,<8.0.0",
+    "pytest-asyncio>=0.23.0,<0.24.0",
+    "httpx>=0.27.0,<0.28.0",
+    "black>=23.7.0,<24.0.0",
+    "mypy>=1.6.0,<2.0.0",
+]
+train = [
+    "pandas>=2.1.0,<3.0.0",
+    "tqdm>=4.65.0,<5.0.0",
+    "matplotlib>=3.7.0,<4.0.0",
+    "seaborn>=0.12.0,<1.0.0",
+    "plotly>=5.18.0,<6.0.0",
+]
+vector = [
+    "sentence-transformers>=2.2.0,<3.0.0",
+]
+cpu = [
+    "torch==2.4.1+cpu",
+]
+gpu = [
+    "torch==2.4.1+cu121",
+]
+
+[tool.poetry]
+name = "detect-ai-agent"
+version = "0.1.0"
+description = "AIエージェント検出システム"
+authors = ["Your Name <your.email@example.com>"]
+packages = [
+    { include = "api", from = "src" },
+    { include = "models", from = "src" },
+    { include = "schemas", from = "src" },
+    { include = "services", from = "src" },
+    { include = "utils", from = "src" },
+]
+include = ["src/config.py"]
+
+[[tool.poetry.source]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+priority = "supplemental"
+
+[[tool.poetry.source]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+priority = "supplemental"
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu", extra = "cpu" },
+    { index = "pytorch-cu121", extra = "gpu" },
+]
+
+[tool.uv]
+conflicts = [
+    [
+        { extra = "cpu" },
+        { extra = "gpu" },
+    ],
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu121"
+url = "https://download.pytorch.org/whl/cu121"
+explicit = true
+
+[tool.poetry.dependencies]
+python = ">=3.10,<4.0"
+fastapi = "^0.116.1"
+uvicorn = "^0.35.0"
+lightgbm = "^4.6.0"
+numpy = "^1.24.0"
+scikit-learn = "^1.3.0"
+joblib = "^1.3.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.0"
+pytest-asyncio = "^0.23.0"
+httpx = "^0.27.0"
+black = "^23.7.0"
+mypy = "^1.6.0"
+
+[tool.poetry.group.train.dependencies]
+pandas = "^2.1.0"
+tqdm = "^4.65.0"
+matplotlib = "^3.7.0"
+seaborn = "^0.12.0"
+plotly = "^5.18.0"
+
+[tool.poetry.group.vector.dependencies]
+sentence-transformers = "^2.2.0"
+
+[dependency-groups]
+dev = [
+    "pytest>=7.4.0,<8.0.0",
+    "pytest-asyncio>=0.23.0,<0.24.0",
+    "httpx>=0.27.0,<0.28.0",
+    "black>=23.7.0,<24.0.0",
+    "mypy>=1.6.0,<2.0.0",
+]
+train = [
+    "pandas>=2.1.0,<3.0.0",
+    "tqdm>=4.65.0,<5.0.0",
+    "matplotlib>=3.7.0,<4.0.0",
+    "seaborn>=0.12.0,<1.0.0",
+    "plotly>=5.18.0,<6.0.0",
+]
+vector = [
+    "sentence-transformers>=2.2.0,<3.0.0",
+]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

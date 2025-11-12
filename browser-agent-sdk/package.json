@@ -1,0 +1,9 @@
+{
+  "name": "browser-agent-sdk-monorepo",
+  "private": true,
+  "workspaces": [
+    "packages/*",
+    "packages/adapters/*"
+  ]
+}
+

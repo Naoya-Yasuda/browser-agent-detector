@@ -1,0 +1,77 @@
+.claude
+.mcp.json
+
+# Dependencies
+node_modules/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Persona training assets
+ai-detector/training/persona/fonts/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# API keys and credentials
+apps/gcloud-key.json
+apps/ecommerce-site/gcloud-key.json
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+.next/
+out/
+
+# Test coverage
+coverage/
+.coverage
+.nyc_output
+
+# Package files
+*.tgz
+*.tar.gz
+
+# Runtime
+*.pid
+*.seed
+*.pid.lock
+
+env
+apps/gcloud-key.json
+apps/ecommerce-site/gcloud-key.json
