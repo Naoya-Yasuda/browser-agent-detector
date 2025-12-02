@@ -117,6 +117,20 @@ function loadServiceAccount(): ServiceAccountKey | null {
     return cachedKeyData ?? null;
   }
 
+  const envJson =
+    process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON?.trim() ||
+    getEnvValue('GOOGLE_APPLICATION_CREDENTIALS_JSON');
+  if (envJson) {
+    try {
+      cachedKeyData = JSON.parse(envJson) as ServiceAccountKey;
+      return cachedKeyData;
+    } catch (error) {
+      console.error('Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON:', error);
+      cachedKeyData = null;
+      return null;
+    }
+  }
+
   const keyPath = resolveKeyPath();
   if (!keyPath) {
     cachedKeyData = null;
@@ -159,9 +173,15 @@ export function getGoogleCloudProjectId(): string {
 }
 
 export function getGoogleAuthOptions() {
-  const options: { scopes: string[]; keyFilename?: string } = {
+  const options: { scopes: string[]; keyFilename?: string; credentials?: ServiceAccountKey } = {
     scopes: ['https://www.googleapis.com/auth/cloud-platform'],
   };
+
+  const keyData = loadServiceAccount();
+  if (keyData) {
+    options.credentials = keyData;
+    return options;
+  }
 
   const keyPath = resolveKeyPath();
   if (keyPath) {
