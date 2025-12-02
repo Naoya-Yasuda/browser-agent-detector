@@ -9,6 +9,11 @@ import NavigationHeader from '@/app/components/NavigationHeader';
 import { BehaviorTrackerProvider } from '@/app/components/BehaviorTrackerProvider';
 import { getRecaptchaSiteKeyFromServer } from '@/app/lib/server/google-cloud';
 
+// Cloudflare Pages でのビルド時にDB/クッキー参照を避け、常に動的レンダリングにする
+export const dynamic = 'force-dynamic';
+export const fetchCache = 'force-no-store';
+export const revalidate = 0;
+
 const inter = Inter({
   subsets: ['latin'],
   variable: '--font-inter',
