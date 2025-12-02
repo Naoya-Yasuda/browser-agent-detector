@@ -13,6 +13,7 @@ import { getRecaptchaSiteKeyFromServer } from '@/app/lib/server/google-cloud';
 export const dynamic = 'force-dynamic';
 export const fetchCache = 'force-no-store';
 export const revalidate = 0;
+export const runtime = 'edge';
 
 const inter = Inter({
   subsets: ['latin'],

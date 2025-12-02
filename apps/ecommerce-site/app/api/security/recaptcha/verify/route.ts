@@ -97,5 +97,5 @@ async function createAssessment(params: {
   return data;
 }
 
-// （任意）EdgeでなくNode実行を明示したい場合は下行を有効化
-export const runtime = 'nodejs';
+// Cloudflare Pages/Workers で動かすため Edge Runtime を明示
+export const runtime = 'edge';
