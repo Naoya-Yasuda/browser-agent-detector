@@ -1,0 +1,10 @@
+name = "ecommerce-site"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+pages_build_output_dir = ".vercel/output/static"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ecommerce-site-db"
+database_id = "045f57bd-c208-4a1f-b444-317a13279f1b"
+migrations_dir = "sql"

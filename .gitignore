@@ -78,4 +78,3 @@ coverage/
 env
 apps/gcloud-key.json
 apps/ecommerce-site/gcloud-key.json
-apps/ecommerce-site/wrangler.toml
