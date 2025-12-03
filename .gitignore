@@ -39,6 +39,7 @@ ai-detector/training/persona/fonts/
 *.sqlite
 *.sqlite3
 *.db-journal
+apps/ecommerce-site/ecommerce-db.sqlite
 
 # Environment variables
 .env
@@ -57,6 +58,8 @@ build/
 *.egg-info/
 .next/
 out/
+.vercel/
+.vc-config.json
 
 # Test coverage
 coverage/
@@ -75,3 +78,4 @@ coverage/
 env
 apps/gcloud-key.json
 apps/ecommerce-site/gcloud-key.json
+apps/ecommerce-site/wrangler.toml

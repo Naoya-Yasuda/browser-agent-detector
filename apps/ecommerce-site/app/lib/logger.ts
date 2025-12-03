@@ -1,31 +1,4 @@
-import fs from 'fs';
-import path from 'path';
 import { openDb } from './db';
-
-// ログディレクトリパス
-const LOG_DIR = path.join(process.cwd(), 'logs');
-
-// ログディレクトリが存在しない場合は作成
-if (!fs.existsSync(LOG_DIR)) {
-  fs.mkdirSync(LOG_DIR, { recursive: true });
-}
-
-// ログファイルパス
-const SECURITY_LOG_FILE = path.join(LOG_DIR, 'security.log');
-const APP_LOG_FILE = path.join(LOG_DIR, 'app.log');
-const ACCESS_LOG_FILE = path.join(LOG_DIR, 'access.log');
-
-// ログをファイルに書き込む関数
-function writeToLog(logFile: string, message: string) {
-  const timestamp = new Date().toISOString();
-  const logMessage = `[${timestamp}] ${message}\n`;
-  
-  fs.appendFile(logFile, logMessage, (err) => {
-    if (err) {
-      console.error('ログファイルへの書き込みエラー:', err);
-    }
-  });
-}
 
 // セキュリティイベントをログに記録
 export function logSecurityEvent(event: {
@@ -42,9 +15,8 @@ export function logSecurityEvent(event: {
   detectionReasons?: any;
   processingTimeMs?: number | null;
 }) {
-  // JSON形式でログ出力
-  const logMessage = JSON.stringify(event);
-  writeToLog(SECURITY_LOG_FILE, logMessage);
+  // JSON形式でコンソール出力（Edge Runtime向け）
+  console.log('[security-log]', JSON.stringify(event));
   
   // データベースにも記録
   (async () => {
@@ -81,7 +53,7 @@ export function logSecurityEvent(event: {
 // アプリケーションエラーをログに記録
 export function logAppError(message: string, error: any) {
   const errorDetails = error instanceof Error ? error.stack || error.message : JSON.stringify(error);
-  writeToLog(APP_LOG_FILE, `ERROR: ${message} - ${errorDetails}`);
+  console.error('[app-error]', message, errorDetails);
 }
 
 // アクセスログを記録
@@ -96,7 +68,7 @@ export function logAccess(req: any, res: any, responseTimeMs: number) {
     userAgent: req.headers['user-agent'] || '',
   };
   
-  writeToLog(ACCESS_LOG_FILE, JSON.stringify(logData));
+  console.log('[access-log]', JSON.stringify(logData));
 }
 
 export default {

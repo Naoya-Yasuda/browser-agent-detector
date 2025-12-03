@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { openDb } from './db';
 import { getUserOrdersWithItems, OrderWithItems } from './orders';
 
@@ -32,8 +31,16 @@ export interface User {
  * パスワードハッシュ化関数（実際にはbcryptなどを使用すべき）
  * @param password ハッシュ化するパスワード
  */
-export function hashPassword(password: string): string {
-  return crypto.createHash('sha256').update(password).digest('hex');
+export async function hashPassword(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(password);
+  const crypto = globalThis.crypto;
+  if (!crypto?.subtle) {
+    throw new Error('Web Crypto is not available');
+  }
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
 /**
@@ -48,7 +55,7 @@ export async function authenticateUser(email: string, password: string): Promise
     // テスト用アカウントの処理は削除し、通常のフローでハッシュ化して認証するように変更
     
     // 通常のユーザー認証（パスワードハッシュを使用）
-    const hashedPassword = hashPassword(password);
+    const hashedPassword = await hashPassword(password);
     
     const query = `
       SELECT 
@@ -126,7 +133,7 @@ export async function registerUser(
       return null;
     }
 
-    const hashedPassword = hashPassword(password);
+    const hashedPassword = await hashPassword(password);
     const member_rank = 'bronze'; // デフォルト会員ランク
 
     // 新規ユーザー登録
