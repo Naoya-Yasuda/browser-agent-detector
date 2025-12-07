@@ -45,8 +45,9 @@ class DetectionService:
         ).reshape(1, -1)
 
         # 学習時のポジティブラベルは「human=1」。モデル出力は human 確率。
-        human_probability = float(self._model.booster.predict(feature_array)[0])
-        logger.info("LightGBM予測確率(human): %s", human_probability)
+        proba = self._model.predict_proba(feature_array)
+        human_probability = float(np.ravel(proba)[0])
+        logger.info("LightGBM予測確率(human): %s (format=%s)", human_probability, self._model.model_format)
 
         score = human_probability  # 人間らしさスコア (0=bot, 1=human)
         is_bot = score < 0.5

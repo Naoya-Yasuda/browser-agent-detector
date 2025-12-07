@@ -7,11 +7,12 @@ import argparse
 import glob
 import json
 import logging
+import joblib
 import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Sequence
+from typing import Any, Dict, Iterable, Iterator, List, Sequence
 
 import lightgbm as lgb
 import numpy as np
@@ -23,7 +24,8 @@ from sklearn.metrics import (
     recall_score,
     roc_auc_score,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupKFold, train_test_split
+from sklearn.base import clone
 
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -89,17 +91,17 @@ def parse_args() -> argparse.Namespace:
         help="検証データの割合 (0-1)。0 を指定すると全件学習。",
     )
     parser.add_argument("--random-state", type=int, default=42, help="乱数 seed。")
-    parser.add_argument("--num-boost-round", type=int, default=500, help="学習ラウンド。")
+    parser.add_argument("--num-boost-round", type=int, default=200, help="学習ラウンド (n_estimators)。")
     parser.add_argument("--early-stopping-rounds", type=int, default=50, help="Early stopping patience。")
-    parser.add_argument("--learning-rate", type=float, default=0.03, help="LightGBM learning_rate。")
+    parser.add_argument("--learning-rate", type=float, default=0.05, help="LightGBM learning_rate。")
     parser.add_argument("--num-leaves", type=int, default=31, help="num_leaves。")
-    parser.add_argument("--feature-fraction", type=float, default=0.7, help="feature_fraction。")
-    parser.add_argument("--bagging-fraction", type=float, default=0.7, help="bagging_fraction。")
+    parser.add_argument("--feature-fraction", type=float, default=0.8, help="feature_fraction。")
+    parser.add_argument("--bagging-fraction", type=float, default=0.8, help="bagging_fraction。")
     parser.add_argument("--min-data-in-leaf", type=int, default=15, help="min_data_in_leaf。")
     parser.add_argument(
         "--max-depth",
         type=int,
-        default=4,
+        default=-1,
         help="max_depth。-1 を指定すると制限なし。",
     )
     parser.add_argument("--bagging-freq", type=int, default=5, help="bagging_freq。")
@@ -252,70 +254,70 @@ def split_train_valid(
     return np.array(sorted(train_indices)), np.array(sorted(valid_indices))
 
 
+def build_classifier(args: argparse.Namespace) -> lgb.LGBMClassifier:
+    """メモ版のパラメータに合わせた LightGBM 分類器を生成する。"""
+
+    class_weight = "balanced" if args.auto_scale_pos_weight else None
+    return lgb.LGBMClassifier(
+        objective="binary",
+        n_estimators=args.num_boost_round,
+        learning_rate=args.learning_rate,
+        num_leaves=args.num_leaves,
+        colsample_bytree=args.feature_fraction,
+        subsample=args.bagging_fraction,
+        subsample_freq=args.bagging_freq,
+        min_child_samples=args.min_data_in_leaf,
+        max_depth=args.max_depth,
+        n_jobs=args.num_threads or -1,
+        reg_alpha=args.lambda_l1,
+        reg_lambda=args.lambda_l2,
+        min_split_gain=args.min_split_gain,
+        class_weight=class_weight,
+        random_state=args.random_state,
+        verbosity=-1,
+    )
+
+
 def train_model(
     train_samples: Sequence[Sample],
     valid_samples: Sequence[Sample] | None,
     args: argparse.Namespace,
-) -> tuple[lgb.Booster, Dict[str, float], Dict[str, float]]:
-    feature_names = DEFAULT_FEATURE_NAMES
+) -> tuple[lgb.LGBMClassifier, Dict[str, float], Dict[str, float]]:
     X_train = np.vstack([s.features for s in train_samples])
     y_train = np.array([s.label for s in train_samples], dtype=np.int32)
 
-    datasets = [lgb.Dataset(X_train, label=y_train, feature_name=feature_names)]
-    valid_set = None
+    model = build_classifier(args)
+
+    eval_set = []
+    X_valid = y_valid = None
     if valid_samples:
         X_valid = np.vstack([s.features for s in valid_samples])
         y_valid = np.array([s.label for s in valid_samples], dtype=np.int32)
-        valid_set = lgb.Dataset(X_valid, label=y_valid, reference=datasets[0], feature_name=feature_names)
-        datasets.append(valid_set)
+        eval_set.append((X_valid, y_valid))
 
-    params = {
-        "objective": "binary",
-        "metric": ["auc", "binary_logloss"],
-        "learning_rate": args.learning_rate,
-        "num_leaves": args.num_leaves,
-        "feature_fraction": args.feature_fraction,
-        "bagging_fraction": args.bagging_fraction,
-        "bagging_freq": args.bagging_freq,
-        "min_data_in_leaf": args.min_data_in_leaf,
-        "max_depth": args.max_depth,
-        "num_threads": args.num_threads,
-        "seed": args.random_state,
-        "lambda_l1": args.lambda_l1,
-        "lambda_l2": args.lambda_l2,
-        "min_split_gain": args.min_split_gain,
-    }
-
-    if args.auto_scale_pos_weight:
-        pos = int(np.sum(y_train == 1))
-        neg = len(y_train) - pos
-        if pos > 0 and neg > 0:
-            params["scale_pos_weight"] = neg / pos
-            LOGGER.info("scale_pos_weight=%.4f", params["scale_pos_weight"])
-
-    callbacks = [lgb.log_evaluation(period=50)]
-    if valid_set and args.early_stopping_rounds > 0:
-        callbacks.append(lgb.early_stopping(args.early_stopping_rounds, verbose=True))
-
-    booster = lgb.train(
-        params,
-        datasets[0],
-        num_boost_round=args.num_boost_round,
-        valid_sets=[datasets[0]] + ([valid_set] if valid_set else []),
-        valid_names=["train"] + (["valid"] if valid_set else []),
-        callbacks=callbacks or None,
+    model.fit(
+        X_train,
+        y_train,
+        eval_set=eval_set or None,
+        eval_metric=["auc", "binary_logloss"],
+        verbose=50 if eval_set else False,
+        early_stopping_rounds=args.early_stopping_rounds if eval_set else None,
     )
 
-    metrics = evaluate_model(booster, X_train, y_train, prefix="train")
+    metrics = evaluate_model(model, X_train, y_train, prefix="train")
     valid_metrics: Dict[str, float] = {}
-    if valid_set is not None:
-        metrics.update(valid_metrics := evaluate_model(booster, X_valid, y_valid, prefix="valid"))
+    if eval_set:
+        metrics.update(valid_metrics := evaluate_model(model, X_valid, y_valid, prefix="valid"))
 
-    return booster, metrics, valid_metrics
+    return model, metrics, valid_metrics
 
 
-def evaluate_model(booster: lgb.Booster, X: np.ndarray, y: np.ndarray, prefix: str) -> Dict[str, float]:
-    preds = booster.predict(X, num_iteration=booster.best_iteration or booster.current_iteration())
+def evaluate_model(model: Any, X: np.ndarray, y: np.ndarray, prefix: str) -> Dict[str, float]:
+    if hasattr(model, "predict_proba"):
+        probs = model.predict_proba(X)
+        preds = probs[:, 1] if getattr(probs, "ndim", 1) > 1 else probs
+    else:
+        preds = model.predict(X)
     pred_labels = (preds >= 0.5).astype(int)
     metrics = {
         f"{prefix}_roc_auc": roc_auc_score(y, preds) if len(np.unique(y)) > 1 else float("nan"),
@@ -329,9 +331,43 @@ def evaluate_model(booster: lgb.Booster, X: np.ndarray, y: np.ndarray, prefix: s
     return metrics
 
 
+def evaluate_group_kfold(samples: Sequence[Sample], args: argparse.Namespace) -> Dict[str, float]:
+    """セッション単位の GroupKFold で交差検証メトリクスを算出する。"""
+
+    session_ids = [s.session_id or f"unknown_{i}" for i, s in enumerate(samples)]
+    unique_sessions = set(session_ids)
+    if len(unique_sessions) < 2:
+        LOGGER.warning("Not enough sessions for GroupKFold; skipping CV.")
+        return {}
+
+    n_splits = min(3, len(unique_sessions))
+    splitter = GroupKFold(n_splits=n_splits)
+    base_model = build_classifier(args)
+
+    X_all = np.vstack([s.features for s in samples])
+    y_all = np.array([s.label for s in samples], dtype=np.int32)
+
+    fold_metrics: List[Dict[str, float]] = []
+    for fold, (train_idx, val_idx) in enumerate(splitter.split(X_all, y_all, session_ids)):
+        fold_model = clone(base_model)
+        fold_model.fit(X_all[train_idx], y_all[train_idx])
+        metrics = evaluate_model(fold_model, X_all[val_idx], y_all[val_idx], prefix="cv")
+        LOGGER.info("CV fold %s/%s metrics: %s", fold + 1, n_splits, metrics)
+        fold_metrics.append(metrics)
+
+    aggregated: Dict[str, float] = {}
+    for key in fold_metrics[0]:
+        aggregated[f"{key}_mean"] = float(np.nanmean([m[key] for m in fold_metrics]))
+    aggregated["cv_folds"] = len(fold_metrics)
+
+    LOGGER.info("GroupKFold aggregated metrics: %s", aggregated)
+    return aggregated
+
+
 def save_artifacts(
-    booster: lgb.Booster,
+    model: Any,
     metrics: Dict[str, float],
+    cv_metrics: Dict[str, float] | None,
     args: argparse.Namespace,
     total_samples: Sequence[Sample],
     train_indices: np.ndarray,
@@ -341,12 +377,25 @@ def save_artifacts(
     artifact_dir = args.output_dir / timestamp
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = artifact_dir / "lightgbm_model.txt"
-    booster.save_model(str(model_path))
+    model_path = artifact_dir / "lightgbm_model.pkl"
+    joblib.dump(model, model_path)
 
-    feature_importance = dict(
-        zip(DEFAULT_FEATURE_NAMES, booster.feature_importance(importance_type="gain").tolist())
-    )
+    metadata = {
+        "model_format": "pickle",
+        "feature_names": DEFAULT_FEATURE_NAMES,
+        "label_mapping": {"human": HUMAN_LABEL, "bot": BOT_LABEL},
+    }
+    metadata_path = artifact_dir / "lightgbm_metadata.json"
+    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+
+    feature_importance: Dict[str, float] = {}
+    booster_txt_path = None
+    if hasattr(model, "booster_"):
+        booster_txt_path = artifact_dir / "lightgbm_model.txt"
+        model.booster_.save_model(str(booster_txt_path))
+        feature_importance = dict(
+            zip(DEFAULT_FEATURE_NAMES, model.booster_.feature_importance(importance_type="gain").tolist())
+        )
 
     args_serializable = {
         key: str(value) if isinstance(value, Path) else value
@@ -363,7 +412,13 @@ def save_artifacts(
         "num_human": int(sum(sample.label == HUMAN_LABEL for sample in total_samples)),
         "num_bot": int(sum(sample.label == BOT_LABEL for sample in total_samples)),
         "metrics": metrics,
+        "cv_metrics": cv_metrics or {},
         "feature_importance_gain": feature_importance,
+        "artifacts": {
+            "model_path": str(model_path),
+            "metadata_path": str(metadata_path),
+            "booster_text_path": str(booster_txt_path) if booster_txt_path else None,
+        },
     }
 
     (artifact_dir / "training_summary.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
@@ -393,13 +448,15 @@ def main() -> None:
         LOGGER.error("No samples loaded. Please check input paths.")
         sys.exit(1)
 
+    cv_metrics = evaluate_group_kfold(samples, args)
+
     train_indices, valid_indices = split_train_valid(samples, args.valid_ratio, args.random_state)
     train_samples = [samples[i] for i in train_indices]
     valid_samples = [samples[i] for i in valid_indices] if valid_indices.size else None
 
-    booster, metrics, _ = train_model(train_samples, valid_samples, args)
-    artifact_dir = save_artifacts(booster, metrics, args, samples, train_indices, valid_indices)
-    LOGGER.info("Training finished. Model saved at %s", artifact_dir / "lightgbm_model.txt")
+    model, metrics, _ = train_model(train_samples, valid_samples, args)
+    artifact_dir = save_artifacts(model, metrics, cv_metrics, args, samples, train_indices, valid_indices)
+    LOGGER.info("Training finished. Model saved at %s", artifact_dir / "lightgbm_model.pkl")
 
 
 if __name__ == "__main__":

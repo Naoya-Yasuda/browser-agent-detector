@@ -20,7 +20,8 @@ else:
 
 # モデル配置ディレクトリ
 MODELS_DIR = BASE_DIR / "models"
-LIGHTGBM_MODEL_PATH = MODELS_DIR / "browser" / "lightgbm_model.txt"
+LIGHTGBM_MODEL_PATH = MODELS_DIR / "browser" / "lightgbm_model.pkl"
+LIGHTGBM_METADATA_PATH = MODELS_DIR / "browser" / "lightgbm_metadata.json"
 BROWSER_ANOMALY_MODEL_PATH = MODELS_DIR / "browser" / "bot_isolation_model.joblib"
 CLUSTER_MODELS_DIR = MODELS_DIR / "persona"
 
