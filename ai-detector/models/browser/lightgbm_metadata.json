@@ -39,8 +39,8 @@
     "PERIODIC_SNAPSHOT",
     "TIMED_SHORT"
   ],
-  "source": "training/browser/memo/train_model.py",
-  "notes": "Pickled LightGBM classifier trained on behavioural logs with group-aware cross validation. Defaults align with the memo experiment.",
+  "source": "training/browser/train_lightgbm.py (params: n_estimators=500, num_leaves=31, lr=0.05)",
+  "notes": "Pickled LightGBM classifier trained on behavioural logs with group-aware cross validation.",
   "reported_metrics": {
     "group_kfold_avg": {
       "accuracy": 0.929,

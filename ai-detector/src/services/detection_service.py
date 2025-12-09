@@ -35,6 +35,7 @@ class DetectionService:
     def __init__(self, model: LightGBMModel, extractor: FeatureExtractor):
         self._model = model
         self._extractor = extractor
+        self._pivot = 0.5
 
     def predict(self, request: UnifiedDetectionRequest) -> DetectionResult:
         """リクエストを受け取り推論を実行。"""
@@ -47,10 +48,15 @@ class DetectionService:
         # 学習時のポジティブラベルは「human=1」。モデル出力は human 確率。
         proba = self._model.predict_proba(feature_array)
         human_probability = float(np.ravel(proba)[0])
-        logger.info("LightGBM予測確率(human): %s (format=%s)", human_probability, self._model.model_format)
+        logger.info(
+            "LightGBM予測確率(human): %.6f (format=%s)",
+            human_probability,
+            self._model.model_format,
+        )
 
         score = human_probability  # 人間らしさスコア (0=bot, 1=human)
-        is_bot = score < 0.5
+        is_bot_threshold = self._pivot
+        is_bot = score < is_bot_threshold
         confidence = abs(score - 0.5) * 2
 
         session_id = request.session_id or str(uuid.uuid4())

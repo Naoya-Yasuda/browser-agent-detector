@@ -1,32 +1,21 @@
 #!/usr/bin/env python3
-"""Human / bot ブラウザ行動データの LightGBM 学習スクリプト。"""
+"""Human / bot ブラウザ行動データの LightGBM 学習スクリプト（メモ版と同等のロジック）。"""
 
 from __future__ import annotations
 
 import argparse
-import glob
 import json
 import logging
-import joblib
-import sys
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Iterator, List, Sequence
+from typing import Any, Dict, List, Tuple
 
+import joblib
 import lightgbm as lgb
 import numpy as np
-from sklearn.metrics import (
-    accuracy_score,
-    average_precision_score,
-    f1_score,
-    precision_score,
-    recall_score,
-    roc_auc_score,
-)
-from sklearn.model_selection import GroupKFold, train_test_split
-from sklearn.base import clone
-
+import pandas as pd
+from sklearn.metrics import accuracy_score, roc_auc_score, precision_recall_fscore_support
+from sklearn.model_selection import GroupKFold
 
 SCRIPT_PATH = Path(__file__).resolve()
 PROJECT_ROOT = SCRIPT_PATH.parents[2]
@@ -34,49 +23,46 @@ PROJECT_ROOT = SCRIPT_PATH.parents[2]
 HUMAN_LABEL = 1
 BOT_LABEL = 0
 
-
-def _configure_pythonpath() -> None:
-    """ai-detector/src を import path に追加する。"""
-
-    src_dir = PROJECT_ROOT / "src"
-    if str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
-
-
-_configure_pythonpath()
-
-from models.lightgbm_loader import DEFAULT_FEATURE_NAMES  # noqa: E402  # isort: skip
-from services.feature_extractor import FeatureExtractor  # noqa: E402  # isort: skip
-from schemas.detection import UnifiedDetectionRequest  # noqa: E402  # isort: skip
-
-
-LOGGER = logging.getLogger(__name__)
-
-
-@dataclass(slots=True)
-class Sample:
-    """1 リクエスト分の特徴量とメタデータ。"""
-
-    features: np.ndarray
-    label: int
-    session_id: str | None
-    request_id: str | None
-    source_path: Path
+# メモ版の特徴量セット（DEFAULT_FEATURE_NAMES と揃える）
+FEATURE_NAMES = [
+    "mouse_movements_count",
+    "mouse_velocity_mean",
+    "mouse_velocity_std",
+    "mouse_velocity_max",
+    "click_avg_interval",
+    "click_precision",
+    "click_double_rate",
+    "keystroke_speed",
+    "keystroke_hold",
+    "keystroke_interval_var",
+    "scroll_speed",
+    "scroll_acc",
+    "scroll_pause",
+    "page_session_duration_ms",
+    "page_dwell_time_ms",
+    "page_first_interaction_delay_ms",
+    "page_form_fill_speed",
+    "page_paste_ratio",
+    "seq_total_actions",
+    "seq_count_mouse_move",
+    "seq_count_click",
+    "seq_count_keystroke",
+    "seq_count_scroll",
+    "seq_count_TIMED_SHORT",
+    "seq_count_TIMED_LONG",
+    "action_type_PAGE_BEFORE_UNLOAD",
+    "action_type_PERIODIC_SNAPSHOT",
+    "action_type_TIMED_SHORT",
+]
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--human-glob",
-        action="append",
-        default=["training/browser/data/human/*.json*"],
-        help="人間データの glob。複数指定可。",
-    )
-    parser.add_argument(
-        "--bot-glob",
-        action="append",
-        default=["training/browser/data/bot/*.json*"],
-        help="AI データの glob。複数指定可。",
+        "--data-dir",
+        type=Path,
+        default=Path("training/browser/data"),
+        help="bot / human サブディレクトリを含むデータディレクトリ",
     )
     parser.add_argument(
         "--output-dir",
@@ -84,56 +70,8 @@ def parse_args() -> argparse.Namespace:
         default=Path("training/browser/model"),
         help="モデルやメトリクスの出力ディレクトリ。",
     )
-    parser.add_argument(
-        "--valid-ratio",
-        type=float,
-        default=0.2,
-        help="検証データの割合 (0-1)。0 を指定すると全件学習。",
-    )
+    parser.add_argument("--model-name", type=str, default="lightgbm_model.pkl", help="出力モデルファイル名。")
     parser.add_argument("--random-state", type=int, default=42, help="乱数 seed。")
-    parser.add_argument("--num-boost-round", type=int, default=200, help="学習ラウンド (n_estimators)。")
-    parser.add_argument("--early-stopping-rounds", type=int, default=50, help="Early stopping patience。")
-    parser.add_argument("--learning-rate", type=float, default=0.05, help="LightGBM learning_rate。")
-    parser.add_argument("--num-leaves", type=int, default=31, help="num_leaves。")
-    parser.add_argument("--feature-fraction", type=float, default=0.8, help="feature_fraction。")
-    parser.add_argument("--bagging-fraction", type=float, default=0.8, help="bagging_fraction。")
-    parser.add_argument("--min-data-in-leaf", type=int, default=15, help="min_data_in_leaf。")
-    parser.add_argument(
-        "--max-depth",
-        type=int,
-        default=-1,
-        help="max_depth。-1 を指定すると制限なし。",
-    )
-    parser.add_argument("--bagging-freq", type=int, default=5, help="bagging_freq。")
-    parser.add_argument(
-        "--num-threads",
-        type=int,
-        default=0,
-        help="LightGBM が使用するスレッド数。0 で自動。",
-    )
-    parser.add_argument(
-        "--lambda-l1",
-        type=float,
-        default=0.1,
-        help="L1 正則化係数。",
-    )
-    parser.add_argument(
-        "--lambda-l2",
-        type=float,
-        default=0.1,
-        help="L2 正則化係数。",
-    )
-    parser.add_argument(
-        "--min-split-gain",
-        type=float,
-        default=0.01,
-        help="最小分割ゲイン (min_split_gain)。",
-    )
-    parser.add_argument(
-        "--auto-scale-pos-weight",
-        action="store_true",
-        help="訓練データのクラス比から scale_pos_weight を自動計算する。",
-    )
     parser.add_argument(
         "--log-level",
         default="INFO",
@@ -143,286 +81,190 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def collect_paths(patterns: Sequence[str], base_dir: Path) -> List[Path]:
-    paths: List[Path] = []
-    for pattern in patterns:
-        raw_pattern = Path(pattern)
-        resolved_pattern = raw_pattern if raw_pattern.is_absolute() else base_dir / pattern
-        for matched in glob.glob(str(resolved_pattern)):
-            path = Path(matched)
-            if path.is_file():
-                paths.append(path)
-    return sorted(paths)
-
-
-def iter_json_records(path: Path) -> Iterator[Dict]:
-    """JSON / JSONL から dict を yield する。"""
-
-    text = path.read_text(encoding="utf-8")
-    if path.suffix == ".jsonl":
-        for line_no, line in enumerate(text.splitlines(), start=1):
+def load_jsonl_file(path: Path) -> List[Dict[str, Any]]:
+    """JSONL を読み込む。"""
+    records: List[Dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
             line = line.strip()
             if not line:
                 continue
-            try:
-                yield json.loads(line)
-            except json.JSONDecodeError as exc:
-                LOGGER.warning("JSONL decode error %s line %s: %s", path, line_no, exc)
-    else:
-        try:
-            data = json.loads(text)
-        except json.JSONDecodeError as exc:
-            LOGGER.warning("JSON decode error %s: %s", path, exc)
-            return
-
-        if isinstance(data, list):
-            for item in data:
-                if isinstance(item, dict):
-                    yield item
-        elif isinstance(data, dict):
-            yield data
+            records.append(json.loads(line))
+    return records
 
 
-def build_samples(paths: Sequence[Path], label: int, extractor: FeatureExtractor) -> List[Sample]:
-    samples: List[Sample] = []
-    for path in paths:
-        for record in iter_json_records(path):
-            payload = record.get("request", record)
-            try:
-                request = UnifiedDetectionRequest.model_validate(payload)
-            except Exception as exc:
-                LOGGER.warning("skip invalid record (%s): %s", path, exc)
-                continue
+def extract_features(record: Dict[str, Any]) -> Dict[str, Any]:
+    """メモ版と同じ特徴量を抽出。"""
+    features: Dict[str, Any] = {}
 
-            features_dict = extractor.extract(request)
-            feature_vector = np.array([features_dict[name] for name in extractor.feature_names], dtype=np.float32)
-            samples.append(
-                Sample(
-                    features=feature_vector,
-                    label=label,
-                    session_id=request.session_id,
-                    request_id=request.request_id,
-                    source_path=path,
-                )
-            )
-    return samples
+    req = record.get("request", {})
+    behavioral_data = req.get("behavioral_data", {})
+    behavior_sequence = req.get("behavior_sequence", []) or req.get("behavioral_sequence", [])
+    context = req.get("context", {})
 
+    mm = behavioral_data.get("mouse_movements", [])
+    velocities = [m.get("velocity") for m in mm if m.get("velocity") is not None]
+    features["mouse_movements_count"] = float(len(mm))
+    features["mouse_velocity_mean"] = float(np.mean(velocities)) if velocities else 0.0
+    features["mouse_velocity_std"] = float(np.std(velocities)) if velocities else 0.0
+    features["mouse_velocity_max"] = float(np.max(velocities)) if velocities else 0.0
 
-def split_train_valid(
-    samples: Sequence[Sample],
-    valid_ratio: float,
-    random_state: int,
-) -> tuple[np.ndarray, np.ndarray]:
-    """セッション単位で train/valid を分割したインデックス配列を返す。"""
+    click = behavioral_data.get("click_patterns", {})
+    features["click_avg_interval"] = float(click.get("avg_click_interval", 0.0) or 0.0)
+    features["click_precision"] = float(click.get("click_precision", 0.0) or 0.0)
+    features["click_double_rate"] = float(click.get("double_click_rate", 0.0) or 0.0)
 
-    n = len(samples)
-    if valid_ratio <= 0 or n == 0:
-        return np.arange(n), np.array([], dtype=int)
+    ks = behavioral_data.get("keystroke_dynamics", {})
+    features["keystroke_speed"] = float(ks.get("typing_speed_cpm", 0.0) or 0.0)
+    features["keystroke_hold"] = float(ks.get("key_hold_time_ms", 0.0) or 0.0)
+    features["keystroke_interval_var"] = float(ks.get("key_interval_variance", 0.0) or 0.0)
 
-    session_to_indices: Dict[str, List[int]] = {}
-    session_labels: Dict[str, int] = {}
-    for idx, sample in enumerate(samples):
-        session_id = sample.session_id or f"unknown_{idx}"
-        session_to_indices.setdefault(session_id, []).append(idx)
-        prev_label = session_labels.get(session_id)
-        if prev_label is None:
-            session_labels[session_id] = sample.label
-        elif prev_label != sample.label:
-            LOGGER.warning("session %s has mixed labels; using latest one", session_id)
-            session_labels[session_id] = sample.label
+    scroll = behavioral_data.get("scroll_behavior", {})
+    features["scroll_speed"] = float(scroll.get("scroll_speed", 0.0) or 0.0)
+    features["scroll_acc"] = float(scroll.get("scroll_acceleration", 0.0) or 0.0)
+    features["scroll_pause"] = float(scroll.get("pause_frequency", 0.0) or 0.0)
 
-    unique_sessions = list(session_to_indices)
-    if len(unique_sessions) < 2:
-        LOGGER.warning("Not enough sessions for validation split; using all data for training.")
-        return np.arange(n), np.array([], dtype=int)
+    page = behavioral_data.get("page_interaction", {})
+    features["page_session_duration_ms"] = float(page.get("session_duration_ms", 0.0) or 0.0)
+    features["page_dwell_time_ms"] = float(page.get("page_dwell_time_ms", 0.0) or 0.0)
+    fid = page.get("first_interaction_delay_ms")
+    features["page_first_interaction_delay_ms"] = float(fid if fid is not None else 0.0)
+    features["page_form_fill_speed"] = float(page.get("form_fill_speed_cpm", 0.0) or 0.0)
+    features["page_paste_ratio"] = float(page.get("paste_ratio", 0.0) or 0.0)
 
-    stratify = [session_labels[s] for s in unique_sessions]
-    test_size = max(valid_ratio, 1 / len(unique_sessions))
-    try:
-        train_sessions, valid_sessions = train_test_split(
-            unique_sessions,
-            test_size=test_size,
-            stratify=stratify if len(set(stratify)) > 1 else None,
-            random_state=random_state,
-        )
-    except ValueError:
-        LOGGER.warning("Failed stratified split; falling back to simple split.")
-        train_sessions, valid_sessions = unique_sessions[:-1], unique_sessions[-1:]
+    action_counts: Dict[str, int] = {}
+    for act in behavior_sequence:
+        action = act.get("action")
+        if action:
+            action_counts[action] = action_counts.get(action, 0) + 1
+    features["seq_total_actions"] = float(sum(action_counts.values()))
+    for action_name in ["mouse_move", "click", "keystroke", "scroll", "TIMED_SHORT", "TIMED_LONG"]:
+        features[f"seq_count_{action_name}"] = float(action_counts.get(action_name, 0))
 
-    train_indices = [idx for sess in train_sessions for idx in session_to_indices[sess]]
-    valid_indices = [idx for sess in valid_sessions for idx in session_to_indices[sess]]
-    return np.array(sorted(train_indices)), np.array(sorted(valid_indices))
+    features["context_action_type"] = context.get("action_type", "UNKNOWN") or "UNKNOWN"
+
+    return features
 
 
-def build_classifier(args: argparse.Namespace) -> lgb.LGBMClassifier:
-    """メモ版のパラメータに合わせた LightGBM 分類器を生成する。"""
+def build_dataset(data_dir: Path) -> Tuple[pd.DataFrame, List[int], List[str]]:
+    all_features: List[Dict[str, Any]] = []
+    labels: List[int] = []
+    session_ids: List[str] = []
 
-    class_weight = "balanced" if args.auto_scale_pos_weight else None
-    return lgb.LGBMClassifier(
+    for cls, label in [("bot", 0), ("human", 1)]:
+        cls_dir = data_dir / cls
+        if not cls_dir.exists():
+            continue
+        for file in cls_dir.glob("*.jsonl"):
+            records = load_jsonl_file(file)
+            for rec in records:
+                feats = extract_features(rec)
+                all_features.append(feats)
+                labels.append(label)
+                session_ids.append(rec.get("session_id", ""))
+
+    df = pd.DataFrame(all_features)
+    return df, labels, session_ids
+
+
+def prepare_features(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
+    cat_col = "context_action_type"
+    dummies = pd.get_dummies(df[cat_col], prefix="action_type")
+    df_numeric = df.drop(columns=[cat_col]).copy()
+    df_processed = pd.concat([df_numeric, dummies], axis=1)
+
+    # DEFAULT_FEATURE_NAMES の順番にそろえ、欠損は 0 で埋める
+    for name in FEATURE_NAMES:
+        if name not in df_processed.columns:
+            df_processed[name] = 0.0
+    df_processed = df_processed[FEATURE_NAMES]
+
+    feature_names = list(df_processed.columns)
+    return df_processed, feature_names
+
+
+def train_and_evaluate(X: pd.DataFrame, y: List[int], groups: List[str]) -> lgb.LGBMClassifier:
+    clf = lgb.LGBMClassifier(
         objective="binary",
-        n_estimators=args.num_boost_round,
-        learning_rate=args.learning_rate,
-        num_leaves=args.num_leaves,
-        colsample_bytree=args.feature_fraction,
-        subsample=args.bagging_fraction,
-        subsample_freq=args.bagging_freq,
-        min_child_samples=args.min_data_in_leaf,
-        max_depth=args.max_depth,
-        n_jobs=args.num_threads or -1,
-        reg_alpha=args.lambda_l1,
-        reg_lambda=args.lambda_l2,
-        min_split_gain=args.min_split_gain,
-        class_weight=class_weight,
-        random_state=args.random_state,
+        n_estimators=500,
+        learning_rate=0.05,
+        num_leaves=31,
+        max_depth=-1,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        class_weight="balanced",
+        random_state=42,
         verbosity=-1,
     )
 
+    n_splits = min(3, len(set(groups)))
+    gkf = GroupKFold(n_splits=n_splits if n_splits > 1 else 2)
+    accuracies: List[float] = []
+    aucs: List[float] = []
+    f1s: List[float] = []
 
-def train_model(
-    train_samples: Sequence[Sample],
-    valid_samples: Sequence[Sample] | None,
-    args: argparse.Namespace,
-) -> tuple[lgb.LGBMClassifier, Dict[str, float], Dict[str, float]]:
-    X_train = np.vstack([s.features for s in train_samples])
-    y_train = np.array([s.label for s in train_samples], dtype=np.int32)
+    for fold, (train_idx, val_idx) in enumerate(gkf.split(X, y, groups)):
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train = [y[i] for i in train_idx]
+        y_val = [y[i] for i in val_idx]
 
-    model = build_classifier(args)
+        clf.fit(X_train, y_train)
+        probs = clf.predict_proba(X_val)[:, 1]
+        preds = (probs >= 0.5).astype(int)
 
-    eval_set = []
-    X_valid = y_valid = None
-    if valid_samples:
-        X_valid = np.vstack([s.features for s in valid_samples])
-        y_valid = np.array([s.label for s in valid_samples], dtype=np.int32)
-        eval_set.append((X_valid, y_valid))
+        acc = accuracy_score(y_val, preds)
+        try:
+            auc = roc_auc_score(y_val, probs)
+        except ValueError:
+            auc = float("nan")
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            y_val, preds, average="binary", zero_division=0
+        )
 
-    model.fit(
-        X_train,
-        y_train,
-        eval_set=eval_set or None,
-        eval_metric=["auc", "binary_logloss"],
-        verbose=50 if eval_set else False,
-        early_stopping_rounds=args.early_stopping_rounds if eval_set else None,
-    )
+        accuracies.append(acc)
+        aucs.append(auc)
+        f1s.append(f1)
+        logging.info("Fold %d: accuracy=%.4f, AUC=%.4f, F1=%.4f", fold + 1, acc, auc, f1)
 
-    metrics = evaluate_model(model, X_train, y_train, prefix="train")
-    valid_metrics: Dict[str, float] = {}
-    if eval_set:
-        metrics.update(valid_metrics := evaluate_model(model, X_valid, y_valid, prefix="valid"))
+    logging.info("Average accuracy: %.4f", float(np.nanmean(accuracies)))
+    logging.info("Average AUC:      %.4f", float(np.nanmean(aucs)))
+    logging.info("Average F1:       %.4f", float(np.nanmean(f1s)))
 
-    return model, metrics, valid_metrics
-
-
-def evaluate_model(model: Any, X: np.ndarray, y: np.ndarray, prefix: str) -> Dict[str, float]:
-    if hasattr(model, "predict_proba"):
-        probs = model.predict_proba(X)
-        preds = probs[:, 1] if getattr(probs, "ndim", 1) > 1 else probs
-    else:
-        preds = model.predict(X)
-    pred_labels = (preds >= 0.5).astype(int)
-    metrics = {
-        f"{prefix}_roc_auc": roc_auc_score(y, preds) if len(np.unique(y)) > 1 else float("nan"),
-        f"{prefix}_pr_auc": average_precision_score(y, preds) if len(np.unique(y)) > 1 else float("nan"),
-        f"{prefix}_accuracy": accuracy_score(y, pred_labels),
-        f"{prefix}_precision": precision_score(y, pred_labels, zero_division=0),
-        f"{prefix}_recall": recall_score(y, pred_labels, zero_division=0),
-        f"{prefix}_f1": f1_score(y, pred_labels, zero_division=0),
-    }
-    LOGGER.info("%s metrics: %s", prefix, metrics)
-    return metrics
-
-
-def evaluate_group_kfold(samples: Sequence[Sample], args: argparse.Namespace) -> Dict[str, float]:
-    """セッション単位の GroupKFold で交差検証メトリクスを算出する。"""
-
-    session_ids = [s.session_id or f"unknown_{i}" for i, s in enumerate(samples)]
-    unique_sessions = set(session_ids)
-    if len(unique_sessions) < 2:
-        LOGGER.warning("Not enough sessions for GroupKFold; skipping CV.")
-        return {}
-
-    n_splits = min(3, len(unique_sessions))
-    splitter = GroupKFold(n_splits=n_splits)
-    base_model = build_classifier(args)
-
-    X_all = np.vstack([s.features for s in samples])
-    y_all = np.array([s.label for s in samples], dtype=np.int32)
-
-    fold_metrics: List[Dict[str, float]] = []
-    for fold, (train_idx, val_idx) in enumerate(splitter.split(X_all, y_all, session_ids)):
-        fold_model = clone(base_model)
-        fold_model.fit(X_all[train_idx], y_all[train_idx])
-        metrics = evaluate_model(fold_model, X_all[val_idx], y_all[val_idx], prefix="cv")
-        LOGGER.info("CV fold %s/%s metrics: %s", fold + 1, n_splits, metrics)
-        fold_metrics.append(metrics)
-
-    aggregated: Dict[str, float] = {}
-    for key in fold_metrics[0]:
-        aggregated[f"{key}_mean"] = float(np.nanmean([m[key] for m in fold_metrics]))
-    aggregated["cv_folds"] = len(fold_metrics)
-
-    LOGGER.info("GroupKFold aggregated metrics: %s", aggregated)
-    return aggregated
+    clf.fit(X, y)
+    return clf
 
 
 def save_artifacts(
-    model: Any,
-    metrics: Dict[str, float],
-    cv_metrics: Dict[str, float] | None,
+    model: lgb.LGBMClassifier,
+    feature_names: List[str],
+    metrics: Dict[str, Any],
     args: argparse.Namespace,
-    total_samples: Sequence[Sample],
-    train_indices: np.ndarray,
-    valid_indices: np.ndarray,
 ) -> Path:
     timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
     artifact_dir = args.output_dir / timestamp
     artifact_dir.mkdir(parents=True, exist_ok=True)
 
-    model_path = artifact_dir / "lightgbm_model.pkl"
+    model_path = artifact_dir / args.model_name
     joblib.dump(model, model_path)
 
     metadata = {
         "model_format": "pickle",
-        "feature_names": DEFAULT_FEATURE_NAMES,
+        "feature_names": feature_names,
         "label_mapping": {"human": HUMAN_LABEL, "bot": BOT_LABEL},
     }
-    metadata_path = artifact_dir / "lightgbm_metadata.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    (artifact_dir / "lightgbm_metadata.json").write_text(json.dumps(metadata, indent=2), encoding="utf-8")
 
-    feature_importance: Dict[str, float] = {}
-    booster_txt_path = None
-    if hasattr(model, "booster_"):
-        booster_txt_path = artifact_dir / "lightgbm_model.txt"
-        model.booster_.save_model(str(booster_txt_path))
-        feature_importance = dict(
-            zip(DEFAULT_FEATURE_NAMES, model.booster_.feature_importance(importance_type="gain").tolist())
-        )
-
-    args_serializable = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in vars(args).items()
-    }
-
-    config = {
-        "args": args_serializable,
-        "feature_names": DEFAULT_FEATURE_NAMES,
-        "label_mapping": {"human": HUMAN_LABEL, "bot": BOT_LABEL},
-        "num_samples": len(total_samples),
-        "train_samples": train_indices.size,
-        "valid_samples": valid_indices.size,
-        "num_human": int(sum(sample.label == HUMAN_LABEL for sample in total_samples)),
-        "num_bot": int(sum(sample.label == BOT_LABEL for sample in total_samples)),
+    summary = {
         "metrics": metrics,
-        "cv_metrics": cv_metrics or {},
-        "feature_importance_gain": feature_importance,
+        "feature_names": feature_names,
+        "label_mapping": {"human": HUMAN_LABEL, "bot": BOT_LABEL},
         "artifacts": {
             "model_path": str(model_path),
-            "metadata_path": str(metadata_path),
-            "booster_text_path": str(booster_txt_path) if booster_txt_path else None,
+            "metadata_path": str(artifact_dir / "lightgbm_metadata.json"),
         },
     }
-
-    (artifact_dir / "training_summary.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
-    LOGGER.info("Artifacts saved to %s", artifact_dir)
+    (artifact_dir / "training_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    logging.info("Artifacts saved to %s", artifact_dir)
     return artifact_dir
 
 
@@ -430,33 +272,24 @@ def main() -> None:
     args = parse_args()
     if not args.output_dir.is_absolute():
         args.output_dir = PROJECT_ROOT / args.output_dir
+    if not args.data_dir.is_absolute():
+        args.data_dir = PROJECT_ROOT / args.data_dir
 
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    extractor = FeatureExtractor(DEFAULT_FEATURE_NAMES)
-    human_paths = collect_paths(args.human_glob, PROJECT_ROOT)
-    bot_paths = collect_paths(args.bot_glob, PROJECT_ROOT)
-    LOGGER.info("Found %d human files, %d bot files", len(human_paths), len(bot_paths))
+    df, labels, session_ids = build_dataset(args.data_dir)
+    if df.empty:
+        raise RuntimeError("No data found to train on")
+    X_processed, feature_names = prepare_features(df)
 
-    samples = []
-    samples.extend(build_samples(human_paths, label=HUMAN_LABEL, extractor=extractor))
-    samples.extend(build_samples(bot_paths, label=BOT_LABEL, extractor=extractor))
-    if not samples:
-        LOGGER.error("No samples loaded. Please check input paths.")
-        sys.exit(1)
+    model = train_and_evaluate(X_processed, labels, session_ids)
 
-    cv_metrics = evaluate_group_kfold(samples, args)
-
-    train_indices, valid_indices = split_train_valid(samples, args.valid_ratio, args.random_state)
-    train_samples = [samples[i] for i in train_indices]
-    valid_samples = [samples[i] for i in valid_indices] if valid_indices.size else None
-
-    model, metrics, _ = train_model(train_samples, valid_samples, args)
-    artifact_dir = save_artifacts(model, metrics, cv_metrics, args, samples, train_indices, valid_indices)
-    LOGGER.info("Training finished. Model saved at %s", artifact_dir / "lightgbm_model.pkl")
+    metrics = {"cv_folds": min(3, len(set(session_ids)))}
+    artifact_dir = save_artifacts(model, feature_names, metrics, args)
+    logging.info("Training finished. Model saved at %s", artifact_dir / args.model_name)
 
 
 if __name__ == "__main__":

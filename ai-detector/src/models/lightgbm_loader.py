@@ -47,7 +47,6 @@ DEFAULT_FEATURE_NAMES: List[str] = [
     "action_type_TIMED_SHORT",
 ]
 
-
 class LightGBMModelDisabledError(RuntimeError):
     """環境変数でブラウザモデルが無効化されている場合の例外。"""
 

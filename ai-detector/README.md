@@ -67,7 +67,13 @@ uv run python training/persona/run_vectorization.py
 cd ai-detector
 gcloud builds submit --tag asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest
 
-# 2) Terraform で Cloud Run を反映
+# 2) Cloud Run へデプロイ（プロバ能力調整の環境変数も付与）
+gcloud run deploy ai-detector \
+  --image asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest \
+  --region asia-northeast1 \
+  --set-env-vars=AI_DETECTOR_PROBA_GAMMA=1.5,AI_DETECTOR_PROBA_PIVOT=0.6
+
+# （Terraform を使う場合は image を差し替えて apply）
 cd infra
 terraform apply \
   -var project_id=browser-agent-detector \
