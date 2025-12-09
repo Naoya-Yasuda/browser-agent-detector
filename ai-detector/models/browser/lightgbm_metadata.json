@@ -1,0 +1,58 @@
+{
+  "model_format": "pickle",
+  "feature_names": [
+    "mouse_movements_count",
+    "mouse_velocity_mean",
+    "mouse_velocity_std",
+    "mouse_velocity_max",
+    "click_avg_interval",
+    "click_precision",
+    "click_double_rate",
+    "keystroke_speed",
+    "keystroke_hold",
+    "keystroke_interval_var",
+    "scroll_speed",
+    "scroll_acc",
+    "scroll_pause",
+    "page_session_duration_ms",
+    "page_dwell_time_ms",
+    "page_first_interaction_delay_ms",
+    "page_form_fill_speed",
+    "page_paste_ratio",
+    "seq_total_actions",
+    "seq_count_mouse_move",
+    "seq_count_click",
+    "seq_count_keystroke",
+    "seq_count_scroll",
+    "seq_count_TIMED_SHORT",
+    "seq_count_TIMED_LONG",
+    "action_type_PAGE_BEFORE_UNLOAD",
+    "action_type_PERIODIC_SNAPSHOT",
+    "action_type_TIMED_SHORT"
+  ],
+  "label_mapping": {
+    "bot": 0,
+    "human": 1
+  },
+  "action_type_categories": [
+    "PAGE_BEFORE_UNLOAD",
+    "PERIODIC_SNAPSHOT",
+    "TIMED_SHORT"
+  ],
+  "source": "training/browser/train_lightgbm.py (params: n_estimators=500, num_leaves=31, lr=0.05)",
+  "notes": "Pickled LightGBM classifier trained on behavioural logs with group-aware cross validation.",
+  "reported_metrics": {
+    "group_kfold_avg": {
+      "accuracy": 0.929,
+      "roc_auc": 0.987,
+      "f1": 0.849
+    },
+    "holdout": {
+      "accuracy": 0.6842,
+      "roc_auc": 0.9664,
+      "precision": 1.0,
+      "recall": 0.2941,
+      "f1": 0.4545
+    }
+  }
+}
