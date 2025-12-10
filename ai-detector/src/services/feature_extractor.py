@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+from collections import Counter
 from typing import Dict, Iterable, List
 
 import numpy as np
@@ -16,11 +17,22 @@ logger = logging.getLogger(__name__)
 class FeatureExtractor:
     """ブラウザ行動データをLightGBM特徴量に変換する。"""
 
-    def __init__(self, feature_names: Iterable[str]):
+    def __init__(self, feature_names: Iterable[str], action_type_categories: Iterable[str] | None = None):
         self.feature_names = list(feature_names)
+        if action_type_categories is not None:
+            self.action_type_categories = list(action_type_categories)
+        else:
+            self.action_type_categories = [
+                name[len("action_type_") :]
+                for name in self.feature_names
+                if name.startswith("action_type_") and len(name) > len("action_type_")
+            ]
 
     def _initialize_features(self) -> Dict[str, float]:
-        return {name: 0.0 for name in self.feature_names}
+        features = {name: 0.0 for name in self.feature_names}
+        for category in self.action_type_categories:
+            features.setdefault(f"action_type_{category}", 0.0)
+        return features
 
     def extract(self, request: UnifiedDetectionRequest) -> Dict[str, float]:
         """統合リクエストから特徴量辞書を生成する。"""
@@ -44,6 +56,7 @@ class FeatureExtractor:
         self._fill_sequence_statistics(features, behavior_sequence)
         self._fill_aggregated_metrics(features, request)
         self._fill_optional_flags(features, behavioral_data)
+        self._fill_action_type_features(features, request)
         self._fill_rate_features(features, behavioral_data)
 
         return features
@@ -87,6 +100,7 @@ class FeatureExtractor:
     ) -> None:
         """アクション回数とマウス速度統計を算出する。"""
         mouse_movements = behavioral_data.mouse_movements
+        features["mouse_movements_count"] = float(len(mouse_movements))
         action_counts = {
             "mouse_move": 0,
             "click": 0,
@@ -121,14 +135,26 @@ class FeatureExtractor:
 
         velocities = [movement.velocity for movement in mouse_movements if movement.velocity is not None]
         if velocities:
-            features["velocity_mean"] = float(np.mean(velocities))
-            features["velocity_max"] = float(np.max(velocities))
-            features["velocity_std"] = float(np.std(velocities, ddof=0))
+            vel_mean = float(np.mean(velocities))
+            vel_max = float(np.max(velocities))
+            vel_std = float(np.std(velocities, ddof=0))
+        else:
+            vel_mean = vel_max = vel_std = 0.0
+
+        features["velocity_mean"] = vel_mean
+        features["velocity_max"] = vel_max
+        features["velocity_std"] = vel_std
+
+        # メモ版特徴量との互換キー
+        features["mouse_velocity_mean"] = vel_mean
+        features["mouse_velocity_max"] = vel_max
+        features["mouse_velocity_std"] = vel_std
 
     def _fill_mouse_statistics(self, features: Dict[str, float], mouse_movements: List[MouseMovement]) -> None:
         count = len(mouse_movements)
         features["mouse_event_count"] = float(count)
         features["mouse_activity_flag"] = 1.0 if count > 0 else 0.0
+        features.setdefault("mouse_movements_count", float(count))
 
         if count >= 2:
             total_length = 0.0
@@ -152,19 +178,22 @@ class FeatureExtractor:
     def _fill_sequence_statistics(self, features: Dict[str, float], sequence: List[BehaviorEvent]) -> None:
         count = len(sequence)
         features["sequence_event_count"] = float(count)
+
+        action_counter: Counter[str] = Counter()
+        for event in sequence:
+            if event.action:
+                action_counter[event.action] += 1
+        total_actions = sum(action_counter.values())
+        features["seq_total_actions"] = float(total_actions)
+        for name in ["mouse_move", "click", "keystroke", "scroll", "TIMED_SHORT", "TIMED_LONG"]:
+            features[f"seq_count_{name}"] = float(action_counter.get(name, 0))
+
         if count:
-            unique_actions = {event.action for event in sequence if event.action}
+            unique_actions = set(action_counter)
             features["sequence_unique_actions"] = float(len(unique_actions))
-            action_counts = {}
-            for event in sequence:
-                if not event.action:
-                    continue
-                key = event.action.lower()
-                action_counts[key] = action_counts.get(key, 0) + 1
-            total_actions = sum(action_counts.values())
             if total_actions > 0:
                 entropy = 0.0
-                for value in action_counts.values():
+                for value in action_counter.values():
                     p = value / total_actions
                     entropy -= p * math.log(p)
                 features["action_entropy"] = entropy
@@ -198,18 +227,29 @@ class FeatureExtractor:
         features["click_click_precision"] = click.click_precision
         features["click_double_click_rate"] = click.double_click_rate
 
+        features["click_avg_interval"] = click.avg_click_interval
+        features["click_precision"] = click.click_precision
+        features["click_double_rate"] = click.double_click_rate
+
         features["keystroke_typing_speed_cpm"] = keystroke.typing_speed_cpm
         features["keystroke_key_hold_time_ms"] = keystroke.key_hold_time_ms
         features["keystroke_key_interval_variance"] = keystroke.key_interval_variance
+        features["keystroke_speed"] = keystroke.typing_speed_cpm
+        features["keystroke_hold"] = keystroke.key_hold_time_ms
+        features["keystroke_interval_var"] = keystroke.key_interval_variance
 
         features["scroll_speed"] = scroll.scroll_speed
         features["scroll_acceleration"] = scroll.scroll_acceleration
         features["pause_frequency"] = scroll.pause_frequency
+        features["scroll_acc"] = scroll.scroll_acceleration
+        features["scroll_pause"] = scroll.pause_frequency
 
         features["page_session_duration_ms"] = page.session_duration_ms
         features["page_page_dwell_time_ms"] = page.page_dwell_time_ms
+        features["page_dwell_time_ms"] = page.page_dwell_time_ms
         features["page_first_interaction_delay_ms"] = page.first_interaction_delay_ms or 0.0
         features["page_form_fill_speed_cpm"] = page.form_fill_speed_cpm or 0.0
+        features["page_form_fill_speed"] = page.form_fill_speed_cpm or 0.0
         features["page_paste_ratio"] = page.paste_ratio or 0.0
 
         features["first_interaction_delay_ms"] = page.first_interaction_delay_ms or 0.0
@@ -229,6 +269,18 @@ class FeatureExtractor:
         features["page_form_fill_missing"] = 1.0 if page.form_fill_speed_cpm is None else 0.0
         features["page_paste_ratio_missing"] = 1.0 if page.paste_ratio is None else 0.0
         features["first_interaction_delay_missing"] = features["page_first_interaction_missing"]
+
+    def _fill_action_type_features(self, features: Dict[str, float], request: UnifiedDetectionRequest) -> None:
+        """context.action_type を one-hot 化する。"""
+        ctx = request.context or {}
+        action_type = None
+        if isinstance(ctx, dict):
+            action_type = ctx.get("action_type")
+        if not action_type:
+            action_type = "UNKNOWN"
+
+        for category in self.action_type_categories:
+            features[f"action_type_{category}"] = 1.0 if action_type == category else 0.0
 
     def _fill_rate_features(self, features: Dict[str, float], behavioral_data) -> None:
         """各アクションを時間で正規化した特徴量を計算する。"""

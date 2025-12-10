@@ -68,13 +68,19 @@ gcloud config set project browser-agent-detector
 
 # 1) イメージを Cloud Build でビルド＆Artifact Registry へプッシュ
 cd ai-detector
-gcloud builds submit \
-    --tag asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest
+gcloud builds submit --tag asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest
 
 # 2) Cloud Run へデプロイ
 gcloud run deploy ai-detector \
-    --image asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest \
-    --region asia-northeast1
+  --image asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest \
+  --region asia-northeast1
+
+# （Terraform を使う場合は image を差し替えて apply）
+cd infra
+terraform apply \
+  -var project_id=browser-agent-detector \
+  -var region=asia-northeast1 \
+  -var image=asia-northeast1-docker.pkg.dev/browser-agent-detector/ai-detector/ai-detector:latest
 ```
 
 - デプロイ完了後に表示される Service URL を、呼び出し元（例: Cloudflare Pages）側の `AI_DETECTOR_ENDPOINT_URL` に設定してください。

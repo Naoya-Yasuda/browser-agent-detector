@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from api.dependencies import get_bot_anomaly_service, get_cluster_service
+from api.dependencies import get_cluster_service, get_detection_service
 from schemas.cluster import ClusterAnomalyRequest
 from schemas.detection import (
     BrowserDetectionResult,
@@ -14,7 +14,7 @@ from schemas.detection import (
     UnifiedDetectionResponse,
 )
 from services.cluster_service import ClusterDetectionService
-from services.bot_anomaly_service import BotAnomalyDetectionService, BotAnomalyResult
+from services.detection_service import DetectionService, DetectionResult
 from utils.training_logger import log_detection_sample
 
 router = APIRouter()
@@ -41,11 +41,11 @@ def _build_cluster_request(request: UnifiedDetectionRequest) -> ClusterAnomalyRe
 @router.post("/detect", response_model=UnifiedDetectionResponse)
 async def detect_agent(
     request: UnifiedDetectionRequest,
-    detection_service: BotAnomalyDetectionService = Depends(get_bot_anomaly_service),
+    detection_service: DetectionService = Depends(get_detection_service),
     cluster_service: ClusterDetectionService = Depends(get_cluster_service),
 ) -> UnifiedDetectionResponse:
     """ブラウザ行動と購入情報を統合した判定を行う。"""
-    browser_result: BotAnomalyResult | None = None
+    browser_result: DetectionResult | None = None
     try:
         browser_result = detection_service.predict(request)
     except Exception as exc:  # pragma: no cover
@@ -99,7 +99,7 @@ async def detect_agent(
             score=browser_result.score,
             is_bot=browser_result.is_bot,
             confidence=browser_result.confidence,
-            raw_prediction=browser_result.bot_score,
+            raw_prediction=browser_result.raw_prediction,
             features_extracted=browser_result.features_extracted,
         ),
         persona_detection=persona_result,
