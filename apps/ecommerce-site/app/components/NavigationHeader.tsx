@@ -65,31 +65,48 @@ export default function NavigationHeader() {
       if (accountNavLoading) return;
       setAccountNavLoading(true);
 
-      let score: number | null = null;
+      let detectionScore: number | null = null;
+      let detectionResult: any = null;
       try {
         const result = await checkDetection('ACCOUNT_NAV');
-        score = extractAiScore(result);
+        detectionResult = result;
+        detectionScore = extractAiScore(result);
       } catch (error) {
         console.error('Account navigation detection error:', error);
       }
 
       // スコアが取れなかった場合はバッジ（localStorage）を信頼し、数値でなければリダイレクトしない
-      if (!Number.isFinite(score) && typeof window !== 'undefined') {
+      let storedScore: number | null = null;
+      if (typeof window !== 'undefined') {
         const stored = window.localStorage.getItem('aiDetectorScore');
         const parsed = stored ? Number.parseFloat(stored) : NaN;
-        score = Number.isFinite(parsed) ? parsed : null;
+        storedScore = Number.isFinite(parsed) ? parsed : null;
       }
 
+      const isFallbackZero =
+        detectionResult &&
+        detectionScore === 0 &&
+        detectionResult.allowed === true &&
+        detectionResult.needsChallenge === false;
+
+      const hasValidDetectionScore =
+        Number.isFinite(detectionScore) && !isFallbackZero;
+
+      const effectiveScore = hasValidDetectionScore
+        ? (detectionScore as number)
+        : storedScore;
+
       const redirectToOtm =
-        Number.isFinite(score) && (score as number) <= OTM_REDIRECT_THRESHOLD;
+        Number.isFinite(effectiveScore) &&
+        (effectiveScore as number) <= OTM_REDIRECT_THRESHOLD;
       const target = redirectToOtm ? '/account/otm' : '/account';
 
       try {
         if (typeof window !== 'undefined') {
-          if (redirectToOtm && Number.isFinite(score)) {
+          if (redirectToOtm && Number.isFinite(effectiveScore)) {
             sessionStorage.setItem(
               'accountNavAiScore',
-              JSON.stringify({ score: Number(score), ts: Date.now() })
+              JSON.stringify({ score: Number(effectiveScore), ts: Date.now() })
             );
           } else {
             sessionStorage.removeItem('accountNavAiScore');
