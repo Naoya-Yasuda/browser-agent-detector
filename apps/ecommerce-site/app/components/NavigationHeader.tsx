@@ -1,12 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, type MouseEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAIDetector } from '@/app/components/AIDetectorProvider';
 import { useAuth } from '../lib/auth-provider';
+
+const OTM_REDIRECT_THRESHOLD = 0.5;
 
 export default function NavigationHeader() {
   const { isLoggedIn, email, logout, userId } = useAuth();
   const [cartCount, setCartCount] = useState(0);
+  const [accountNavLoading, setAccountNavLoading] = useState(false);
+  const router = useRouter();
+  const { checkDetection } = useAIDetector();
 
   // カート数を取得する関数
   const fetchCartCount = async () => {
@@ -42,6 +49,78 @@ export default function NavigationHeader() {
   useEffect(() => {
     fetchCartCount();
   }, [isLoggedIn, userId]);
+
+  const extractAiScore = useCallback((payload: any): number | null => {
+    if (!payload) return null;
+    if (typeof payload.botScore === 'number') return payload.botScore;
+    if (typeof payload.bot_score === 'number') return payload.bot_score;
+    if (typeof payload.score === 'number') return payload.score;
+    const browserScore = payload?.browser_detection?.score;
+    return typeof browserScore === 'number' ? browserScore : null;
+  }, []);
+
+  const handleAccountNavigate = useCallback(
+    async (event?: MouseEvent<HTMLAnchorElement>) => {
+      event?.preventDefault();
+      if (accountNavLoading) return;
+      setAccountNavLoading(true);
+
+      let detectionScore: number | null = null;
+      let detectionResult: any = null;
+      try {
+        const result = await checkDetection('ACCOUNT_NAV');
+        detectionResult = result;
+        detectionScore = extractAiScore(result);
+      } catch (error) {
+        console.error('Account navigation detection error:', error);
+      }
+
+      // スコアが取れなかった場合はバッジ（localStorage）を信頼し、数値でなければリダイレクトしない
+      let storedScore: number | null = null;
+      if (typeof window !== 'undefined') {
+        const stored = window.localStorage.getItem('aiDetectorScore');
+        const parsed = stored ? Number.parseFloat(stored) : NaN;
+        storedScore = Number.isFinite(parsed) ? parsed : null;
+      }
+
+      const isFallbackZero =
+        detectionResult &&
+        detectionScore === 0 &&
+        detectionResult.allowed === true &&
+        detectionResult.needsChallenge === false;
+
+      const hasValidDetectionScore =
+        Number.isFinite(detectionScore) && !isFallbackZero;
+
+      const effectiveScore = hasValidDetectionScore
+        ? (detectionScore as number)
+        : storedScore;
+
+      const redirectToOtm =
+        Number.isFinite(effectiveScore) &&
+        (effectiveScore as number) <= OTM_REDIRECT_THRESHOLD;
+      const target = redirectToOtm ? '/account/otm' : '/account';
+
+      try {
+        if (typeof window !== 'undefined') {
+          if (redirectToOtm && Number.isFinite(effectiveScore)) {
+            sessionStorage.setItem(
+              'accountNavAiScore',
+              JSON.stringify({ score: Number(effectiveScore), ts: Date.now() })
+            );
+          } else {
+            sessionStorage.removeItem('accountNavAiScore');
+          }
+        }
+      } catch (error) {
+        console.error('Failed to persist account nav score:', error);
+      }
+
+      router.push(target);
+      setAccountNavLoading(false);
+    },
+    [accountNavLoading, checkDetection, extractAiScore, router],
+  );
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-pink-700 via-pink-600 to-pink-500 text-white shadow-lg border-b border-pink-500">
@@ -98,8 +177,9 @@ export default function NavigationHeader() {
                 <span className="text-sm text-pink-200">こんにちは、{email}</span>
                 <Link
                   href="/account"
+                  onClick={handleAccountNavigate}
                   className="bg-pink-500/30 backdrop-blur-sm text-white hover:bg-pink-500/50 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-300 shadow-lg border border-pink-400/30">
-                  アカウント
+                  {accountNavLoading ? 'チェック中...' : 'アカウント'}
                 </Link>
                 <button
                   onClick={logout}
@@ -148,8 +228,11 @@ export default function NavigationHeader() {
               </Link>
             </li>
             <li className="flex-1">
-              <Link href="/account" className="block text-center py-2 px-1 bg-white/10 rounded-lg text-white hover:bg-white/20 hover:text-pink-200 font-medium transition-colors">
-                アカウント
+              <Link
+                href="/account"
+                onClick={handleAccountNavigate}
+                className="block text-center py-2 px-1 bg-white/10 rounded-lg text-white hover:bg-white/20 hover:text-pink-200 font-medium transition-colors">
+                {accountNavLoading ? 'チェック中...' : 'アカウント'}
               </Link>
             </li>
           </ul>
