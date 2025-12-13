@@ -1,12 +1,19 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, type MouseEvent } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAIDetector } from '@/app/components/AIDetectorProvider';
 import { useAuth } from '../lib/auth-provider';
+
+const OTM_REDIRECT_THRESHOLD = 0.5;
 
 export default function NavigationHeader() {
   const { isLoggedIn, email, logout, userId } = useAuth();
   const [cartCount, setCartCount] = useState(0);
+  const [accountNavLoading, setAccountNavLoading] = useState(false);
+  const router = useRouter();
+  const { checkDetection } = useAIDetector();
 
   // カート数を取得する関数
   const fetchCartCount = async () => {
@@ -42,6 +49,54 @@ export default function NavigationHeader() {
   useEffect(() => {
     fetchCartCount();
   }, [isLoggedIn, userId]);
+
+  const extractAiScore = useCallback((payload: any): number | null => {
+    if (!payload) return null;
+    if (typeof payload.botScore === 'number') return payload.botScore;
+    if (typeof payload.bot_score === 'number') return payload.bot_score;
+    if (typeof payload.score === 'number') return payload.score;
+    const browserScore = payload?.browser_detection?.score;
+    return typeof browserScore === 'number' ? browserScore : null;
+  }, []);
+
+  const handleAccountNavigate = useCallback(
+    async (event?: MouseEvent<HTMLAnchorElement>) => {
+      event?.preventDefault();
+      if (accountNavLoading) return;
+      setAccountNavLoading(true);
+
+      let score: number | null = null;
+      try {
+        const result = await checkDetection('ACCOUNT_NAV');
+        score = extractAiScore(result);
+      } catch (error) {
+        console.error('Account navigation detection error:', error);
+      }
+
+      const redirectToOtm =
+        typeof score === 'number' ? score <= OTM_REDIRECT_THRESHOLD : false;
+      const target = redirectToOtm ? '/account/otm' : '/account';
+
+      try {
+        if (typeof window !== 'undefined') {
+          if (redirectToOtm) {
+            sessionStorage.setItem(
+              'accountNavAiScore',
+              JSON.stringify({ score, ts: Date.now() })
+            );
+          } else {
+            sessionStorage.removeItem('accountNavAiScore');
+          }
+        }
+      } catch (error) {
+        console.error('Failed to persist account nav score:', error);
+      }
+
+      router.push(target);
+      setAccountNavLoading(false);
+    },
+    [accountNavLoading, checkDetection, extractAiScore, router],
+  );
 
   return (
     <header className="fixed top-0 left-0 right-0 z-50 bg-gradient-to-r from-pink-700 via-pink-600 to-pink-500 text-white shadow-lg border-b border-pink-500">
@@ -98,8 +153,9 @@ export default function NavigationHeader() {
                 <span className="text-sm text-pink-200">こんにちは、{email}</span>
                 <Link
                   href="/account"
+                  onClick={handleAccountNavigate}
                   className="bg-pink-500/30 backdrop-blur-sm text-white hover:bg-pink-500/50 px-4 py-2 rounded-lg font-medium text-sm transition-all duration-300 shadow-lg border border-pink-400/30">
-                  アカウント
+                  {accountNavLoading ? 'チェック中...' : 'アカウント'}
                 </Link>
                 <button
                   onClick={logout}
@@ -148,8 +204,11 @@ export default function NavigationHeader() {
               </Link>
             </li>
             <li className="flex-1">
-              <Link href="/account" className="block text-center py-2 px-1 bg-white/10 rounded-lg text-white hover:bg-white/20 hover:text-pink-200 font-medium transition-colors">
-                アカウント
+              <Link
+                href="/account"
+                onClick={handleAccountNavigate}
+                className="block text-center py-2 px-1 bg-white/10 rounded-lg text-white hover:bg-white/20 hover:text-pink-200 font-medium transition-colors">
+                {accountNavLoading ? 'チェック中...' : 'アカウント'}
               </Link>
             </li>
           </ul>
