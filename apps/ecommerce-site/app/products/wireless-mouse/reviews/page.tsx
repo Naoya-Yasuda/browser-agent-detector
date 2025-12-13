@@ -71,9 +71,10 @@ export default async function WirelessMouseReviewsPage() {
                     <span className="text-xs text-gray-500">{review.date}</span>
                   </div>
                   <div className="text-xs text-gray-600 mb-1">評価: {review.rating}/5</div>
-                  <p className="text-sm text-gray-800 whitespace-pre-line leading-relaxed">
-                    {review.content}
-                  </p>
+                  <p
+                    className="text-sm text-gray-800 whitespace-pre-line leading-relaxed"
+                    dangerouslySetInnerHTML={{ __html: review.contentHtml }}
+                  />
                 </div>
               ))}
             </div>
