@@ -79,7 +79,7 @@ export default function NavigationHeader() {
 
       try {
         if (typeof window !== 'undefined') {
-          if (redirectToOtm) {
+          if (redirectToOtm && typeof score === 'number') {
             sessionStorage.setItem(
               'accountNavAiScore',
               JSON.stringify({ score, ts: Date.now() })
