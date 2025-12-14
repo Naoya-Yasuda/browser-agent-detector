@@ -28,9 +28,6 @@ function updateSecurityBadgeFromResult(result: any) {
       if (typeof persona.anomaly_score === 'number') {
         localStorage.setItem('clusteringScore', persona.anomaly_score.toFixed(3));
       }
-      if (typeof persona.threshold === 'number') {
-        localStorage.setItem('clusteringThreshold', persona.threshold.toFixed(3));
-      }
     }
   } catch {
     // ignore quota errors
@@ -39,10 +36,9 @@ function updateSecurityBadgeFromResult(result: any) {
   try {
     const recaptchaScore = localStorage.getItem('recaptchaOriginalScore') || '-';
     const clusteringScore = localStorage.getItem('clusteringScore') || '-';
-    const clusteringThreshold = localStorage.getItem('clusteringThreshold') || '-';
     const createScoreDisplay = (window as any).createScoreDisplay;
     if (typeof createScoreDisplay === 'function') {
-      createScoreDisplay('AI検知スコア', recaptchaScore, formatted, clusteringScore, clusteringThreshold);
+      createScoreDisplay('AI検知スコア', recaptchaScore, formatted, clusteringScore);
     }
   } catch (error) {
     console.error('score badge update error', error);

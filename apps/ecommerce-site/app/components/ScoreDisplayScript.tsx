@@ -49,16 +49,14 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
                       <p data-score-recaptcha style="margin:4px 0 0;font-size:22px;font-weight:700;color:#10B981;">-</p>
                     </div>
                     <div>
-                      <p style="margin:0;font-size:11px;color:#6B7280;">AI Detector</p>
-                      <p data-score-ai style="margin:4px 0 0;font-size:22px;font-weight:700;color:#6366F1;">-</p>
+                      <p style="margin:0;font-size:11px;color:#6B7280;">ブラウザ操作＋指紋</p>
+                      <p style="margin:2px 0 0;font-size:10px;color:#9CA3AF;">(0.5以下の場合bot判定)</p>
+                      <p data-score-ai style="margin:2px 0 0;font-size:22px;font-weight:700;color:#6366F1;">-</p>
                     </div>
                     <div>
-                      <p style="margin:0;font-size:11px;color:#6B7280;">クラスタリング</p>
-                      <p data-score-cluster style="margin:4px 0 0;font-size:18px;font-weight:600;color:#111827;">-</p>
-                    </div>
-                    <div>
-                      <p style="margin:0;font-size:11px;color:#6B7280;">閾値</p>
-                      <p data-score-threshold style="margin:4px 0 0;font-size:18px;font-weight:600;color:#111827;">-</p>
+                      <p style="margin:0;font-size:11px;color:#6B7280;">ペルソナ逸脱</p>
+                      <p style="margin:2px 0 0;font-size:10px;color:#9CA3AF;">(0未満の場合bot判定)</p>
+                      <p data-score-cluster style="margin:2px 0 0;font-size:18px;font-weight:600;color:#111827;">-</p>
                     </div>
                   </div>
                   <p style="margin:12px 0 0;font-size:11px;color:#94A3B8;">
@@ -85,7 +83,7 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
             }
           }
 
-          function createScoreDisplay(title, recaptchaScore, aiScore, clusteringScore, clusteringThreshold) {
+          function createScoreDisplay(title, recaptchaScore, aiScore, clusteringScore) {
             const root = ensureOverlay();
             if (!root) {
               return;
@@ -95,7 +93,6 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
             updateText(root, '[data-score-recaptcha]', recaptchaScore);
             updateText(root, '[data-score-ai]', aiScore);
             updateText(root, '[data-score-cluster]', clusteringScore);
-            updateText(root, '[data-score-threshold]', clusteringThreshold);
             updateText(root, '[data-score-updated]', new Date().toLocaleTimeString());
           }
 
@@ -106,7 +103,7 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
             const attempt = () => {
               const overlay = ensureOverlay();
               if (overlay) {
-                createScoreDisplay('セキュリティスコア', '-', '-', '-', '-');
+                createScoreDisplay('セキュリティスコア', '-', '-', '-');
                 return true;
               }
               return false;
@@ -153,13 +150,7 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
 
               if (!response.ok) {
                 if (window.createScoreDisplay) {
-                  window.createScoreDisplay(
-                    'reCAPTCHAスコア',
-                    '-',
-                    localStorage.getItem('aiDetectorScore') || '-',
-                    localStorage.getItem('clusteringScore') || '-',
-                    localStorage.getItem('clusteringThreshold') || '-'
-                  );
+                  window.createScoreDisplay('reCAPTCHAスコア', '-', localStorage.getItem('aiDetectorScore') || '-', localStorage.getItem('clusteringScore') || '-');
                 }
                 return;
               }
@@ -176,17 +167,11 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
                 console.log('🔵 localStorageから取得したAIスコア:', aiDetectorScore);
 
                 if (window.createScoreDisplay) {
-                  window.createScoreDisplay('reCAPTCHAスコア', formattedScore, aiDetectorScore || '-', null, null);
+                  window.createScoreDisplay('reCAPTCHAスコア', formattedScore, aiDetectorScore || '-', null);
                 }
               } else {
                 if (window.createScoreDisplay) {
-                  window.createScoreDisplay(
-                    'reCAPTCHAスコア',
-                    '-',
-                    localStorage.getItem('aiDetectorScore') || '-',
-                    localStorage.getItem('clusteringScore') || '-',
-                    localStorage.getItem('clusteringThreshold') || '-'
-                  );
+                  window.createScoreDisplay('reCAPTCHAスコア', '-', localStorage.getItem('aiDetectorScore') || '-', localStorage.getItem('clusteringScore') || '-');
                 }
               }
             } catch (error) {
@@ -215,33 +200,32 @@ export default function ScoreDisplayScript({ siteKey = '' }: { siteKey?: string 
             checkRecaptchaScore();
           }
 
-            const start = function () {
-              kickoffInitialDisplay();
+          const start = function () {
+            kickoffInitialDisplay();
 
-              // Hydration 等で DOM が書き換わってもバッジが消えないよう監視
-              if (document.body) {
-                const observer = new MutationObserver(() => {
-                  if (!document.getElementById('security-score-overlay')) {
-                    const restored = ensureOverlay();
-                    if (restored) {
-                      createScoreDisplay(
-                        localStorage.getItem('scoreBadgeTitle') || 'セキュリティスコア',
-                        localStorage.getItem('recaptchaOriginalScore') || '-',
-                        localStorage.getItem('aiDetectorScore') || '-',
-                        localStorage.getItem('clusteringScore') || '-',
-                        localStorage.getItem('clusteringThreshold') || '-',
-                      );
-                    }
+            // Hydration 等で DOM が書き換わってもバッジが消えないよう監視
+            if (document.body) {
+              const observer = new MutationObserver(() => {
+                if (!document.getElementById('security-score-overlay')) {
+                  const restored = ensureOverlay();
+                  if (restored) {
+                    createScoreDisplay(
+                      localStorage.getItem('scoreBadgeTitle') || 'セキュリティスコア',
+                      localStorage.getItem('recaptchaOriginalScore') || '-',
+                      localStorage.getItem('aiDetectorScore') || '-',
+                      localStorage.getItem('clusteringScore') || '-'
+                    );
                   }
-                });
-                observer.observe(document.body, { childList: true });
-              }
+                }
+              });
+              observer.observe(document.body, { childList: true });
+            }
 
-              if (HAS_SITE_KEY) {
-                waitForRecaptchaReady(0);
-              } else {
-                console.log('reCAPTCHA site key が無いため自動スコア取得をスキップしました');
-              }
+            if (HAS_SITE_KEY) {
+              waitForRecaptchaReady(0);
+            } else {
+              console.log('reCAPTCHA site key が無いため自動スコア取得をスキップしました');
+            }
           };
 
           if (document.readyState === 'complete' || document.readyState === 'interactive') {

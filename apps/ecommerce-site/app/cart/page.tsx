@@ -237,24 +237,17 @@ export default function CartPage() {
 
       const data = await response.json();
 
-      // クラスタリングスコアと閾値をローカルストレージに保存（成功・失敗問わず）
+      // クラスタリング（ペルソナ逸脱）スコアをローカルストレージに保存（成功・失敗問わず）
       if (data.clusteringScore !== null && data.clusteringScore !== undefined) {
         localStorage.setItem('clusteringScore', data.clusteringScore.toFixed(3));
         console.log('クラスタリングスコアを保存:', data.clusteringScore);
-
-        // 閾値も保存
-        if (data.clusteringThreshold !== null && data.clusteringThreshold !== undefined) {
-          localStorage.setItem('clusteringThreshold', data.clusteringThreshold.toFixed(3));
-          console.log('クラスタリング閾値を保存:', data.clusteringThreshold);
-        }
 
         // ポップアップを強制的に表示
         if ((window as any).createScoreDisplay) {
           const recaptchaScore = localStorage.getItem('recaptchaOriginalScore') || '-';
           const aiDetectorScore = localStorage.getItem('aiDetectorScore') || '-';
           const clusteringScore = data.clusteringScore.toFixed(3);
-          const clusteringThreshold = data.clusteringThreshold ? data.clusteringThreshold.toFixed(3) : '-';
-          (window as any).createScoreDisplay(null, recaptchaScore, aiDetectorScore, clusteringScore, clusteringThreshold);
+          (window as any).createScoreDisplay(null, recaptchaScore, aiDetectorScore, clusteringScore);
         }
       }
 
